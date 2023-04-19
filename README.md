@@ -1,6 +1,8 @@
 # gha-get-changed-files
 Composite GitHub action that produces lists of files modified between given commit hashes or references using GitHub API. Will return structured json result.
 
+The action was inspired by https://github.com/lots0logs/gh-action-get-changed-files and it's forks but I wanted to develop this more compact and readable alternative.
+
 Resulting structured json object has following properties:
 - added: Array of files added
 - modified: Array of files modified
