@@ -1,0 +1,70 @@
+name: Changed Files
+description: Produce lists of modified files
+inputs:
+  base:
+    description: Base commit SHA or ref
+    required: true
+    type: string
+  head:
+    description: Head commit SHA or ref
+    required: true
+    type: string
+outputs:
+  result:
+    description: |
+      Structured json object with following properties:
+      - added: Files added
+      - modified: Files modified
+      - renamed: Files renamed
+      - deleted: Files deleted
+      - simple_add: All files that are either modified, added or renamed (new file name)
+      - simple_delete: All files that are either deleted or renamed (old file name)
+    value: ${{ steps.check.outputs.result }}
+runs:
+  using: composite
+  steps:
+    - name: Check file changes between commits
+      uses: actions/github-script@v6
+      id: check
+      with:
+        script: |
+          const base = "${{ inputs.base }}";
+          const head = "${{ inputs.head }}";
+          const base_head = `${base}...${head}`;
+          
+          // Get reviews from the GitHub API.
+          const compare = await github.request('GET /repos/{owner}/{repo}/compare/{base_head}', {
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            base_head: base_head
+          });
+
+          const added = [];
+          const modified = [];
+          const renamed = {};
+          const deleted = [];
+
+          const simple_add = [];
+          const simple_delete = [];
+
+          for (const file of compare.data.files) {
+            if (file.status === "added") {
+              added.push(file.filename);
+              simple_add.push(file.filename);
+            } else if (file.status === "modified") {
+              modified.push(file.filename);
+              simple_add.push(file.filename);
+            } else if (file.status === "renamed") {
+              renamed[file.previous_filename] = file.filename;
+              simple_add.push(file.filename);
+              simple_delete.push(file.previous_filename);
+            } else if (file.status === "removed") {
+              deleted.push(file.filename);
+              simple_delete.push(file.filename);
+            }
+          };
+
+          result = { added: added, modified: modified, renamed: renamed, deleted: deleted,
+            simple_add: simple_add, simple_delete: simple_delete };
+          console.log(JSON.stringify(result, null, 2));
+          return result;
