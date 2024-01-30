@@ -24,7 +24,7 @@ runs:
   using: composite
   steps:
     - name: Check file changes between commits
-      uses: actions/github-script@v6
+      uses: actions/github-script@v7
       id: check
       with:
         script: |
