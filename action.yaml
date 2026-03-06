@@ -24,47 +24,67 @@ runs:
   using: composite
   steps:
     - name: Check file changes between commits
-      uses: actions/github-script@v7
       id: check
-      with:
-        script: |
-          const base = "${{ inputs.base }}";
-          const head = "${{ inputs.head }}";
-          const base_head = `${base}...${head}`;
-          
-          // Get reviews from the GitHub API.
-          const compare = await github.request('GET /repos/{owner}/{repo}/compare/{base_head}', {
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            base_head: base_head
-          });
+      shell: bash
+      run: |
+        base="${{ inputs.base }}"
+        head="${{ inputs.head }}"
 
-          const added = [];
-          const modified = [];
-          const renamed = {};
-          const deleted = [];
+        # Get all changed files with their status
+        git diff --name-status "$base...$head" > /tmp/diff_output.txt
 
-          const simple_add = [];
-          const simple_delete = [];
+        added=()
+        modified=()
+        renamed_json="{}"
+        deleted=()
+        simple_add=()
+        simple_delete=()
 
-          for (const file of compare.data.files) {
-            if (file.status === "added") {
-              added.push(file.filename);
-              simple_add.push(file.filename);
-            } else if (file.status === "modified") {
-              modified.push(file.filename);
-              simple_add.push(file.filename);
-            } else if (file.status === "renamed") {
-              renamed[file.previous_filename] = file.filename;
-              simple_add.push(file.filename);
-              simple_delete.push(file.previous_filename);
-            } else if (file.status === "removed") {
-              deleted.push(file.filename);
-              simple_delete.push(file.filename);
-            }
-          };
+        while IFS=$'\t' read -r status old_file new_file; do
+          case "$status" in
+            A)
+              added+=("$old_file")
+              simple_add+=("$old_file")
+              ;;
+            M)
+              modified+=("$old_file")
+              simple_add+=("$old_file")
+              ;;
+            D)
+              deleted+=("$old_file")
+              simple_delete+=("$old_file")
+              ;;
+            R*)
+              # Renamed: old_file is old name, new_file is new name
+              renamed_json=$(echo "$renamed_json" | jq --arg old "$old_file" --arg new "$new_file" '.[$old] = $new')
+              simple_add+=("$new_file")
+              simple_delete+=("$old_file")
+              ;;
+          esac
+        done < /tmp/diff_output.txt
 
-          result = { added: added, modified: modified, renamed: renamed, deleted: deleted,
-            simple_add: simple_add, simple_delete: simple_delete };
-          console.log(JSON.stringify(result, null, 2));
-          return result;
+        # Build JSON output using jq to handle array formatting
+        result=$(jq -n \
+          --argjson added "$(printf '%s\n' "${added[@]}" | jq -Rs 'split("\n") | map(select(length > 0))')" \
+          --argjson modified "$(printf '%s\n' "${modified[@]}" | jq -Rs 'split("\n") | map(select(length > 0))')" \
+          --argjson renamed "$renamed_json" \
+          --argjson deleted "$(printf '%s\n' "${deleted[@]}" | jq -Rs 'split("\n") | map(select(length > 0))')" \
+          --argjson simple_add "$(printf '%s\n' "${simple_add[@]}" | jq -Rs 'split("\n") | map(select(length > 0))')" \
+          --argjson simple_delete "$(printf '%s\n' "${simple_delete[@]}" | jq -Rs 'split("\n") | map(select(length > 0))')" \
+          '{
+            added: $added,
+            modified: $modified,
+            renamed: $renamed,
+            deleted: $deleted,
+            simple_add: $simple_add,
+            simple_delete: $simple_delete
+          }')
+
+        # Output result using heredoc format for multi-line JSON
+        {
+          echo "result<<EOF"
+          echo "$result"
+          echo "EOF"
+        } >> $GITHUB_OUTPUT
+        
+        echo "$result" | jq '.'
